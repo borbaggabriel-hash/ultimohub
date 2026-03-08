@@ -11,7 +11,8 @@ export function redirectToLogin(toast?: (options: { title: string; description: 
       variant: "destructive",
     });
   }
-  setTimeout(() => {
-    window.location.href = "/api/login";
+  setTimeout(async () => {
+    const { memoryNavigate } = await import("@/lib/memory-router");
+    memoryNavigate("/login");
   }, 500);
 }

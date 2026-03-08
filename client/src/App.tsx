@@ -1,4 +1,5 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, Router as WouterRouter, useLocation } from "wouter";
+import { memoryHook } from "@/lib/memory-router";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -26,6 +27,7 @@ import { StudioLayout } from "@/components/layout/studio-layout";
 
 function ProtectedRoute({ component: Component, requireStudio = false, ...rest }: any) {
   const { user, isLoading } = useAuth();
+  const [, navigate] = useLocation();
 
   if (isLoading) {
     return (
@@ -36,7 +38,7 @@ function ProtectedRoute({ component: Component, requireStudio = false, ...rest }
   }
 
   if (!user) {
-    window.location.href = "/login";
+    navigate("/login", { replace: true });
     return null;
   }
 
@@ -60,6 +62,7 @@ function ProtectedRoute({ component: Component, requireStudio = false, ...rest }
 
 function StudioSelectRoute() {
   const { user, isLoading } = useAuth();
+  const [, navigate] = useLocation();
 
   if (isLoading) {
     return (
@@ -70,7 +73,7 @@ function StudioSelectRoute() {
   }
 
   if (!user) {
-    window.location.href = "/login";
+    navigate("/login", { replace: true });
     return null;
   }
 
@@ -133,8 +136,10 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <ErrorBoundary>
-          <Toaster />
-          <Router />
+          <WouterRouter hook={memoryHook}>
+            <Toaster />
+            <Router />
+          </WouterRouter>
         </ErrorBoundary>
       </TooltipProvider>
     </QueryClientProvider>

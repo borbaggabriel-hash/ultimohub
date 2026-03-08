@@ -25,8 +25,8 @@ Preferred communication style: Simple, everyday language.
 ### Frontend Architecture
 
 - **Framework**: React 18 with TypeScript, using Vite as the bundler
-- **Routing**: Wouter (lightweight client-side routing)
-- **State/Data Fetching**: TanStack React Query v5 for server state management; all API calls go through a shared `authFetch` utility that handles 401 redirects to `/api/login`
+- **Routing**: Wouter with `memoryLocation` (in-memory routing — browser URL never changes). Shared memory router module at `client/src/lib/memory-router.ts` exports `memoryHook` and `memoryNavigate`. Initial path is read from `window.location.pathname` so deep links work on first load, but subsequent navigation stays in memory. This keeps the custom domain URL clean.
+- **State/Data Fetching**: TanStack React Query v5 for server state management; all API calls go through a shared `authFetch` utility that handles 401 redirects to `/login` via memory router
 - **UI Components**: shadcn/ui (New York style) built on Radix UI primitives, styled with Tailwind CSS
 - **Design System**: Glassmorphism dark theme — custom CSS variables in `index.css`; animated mesh gradient background (3 radial gradients, 25s animation); custom `.vhub-*` component classes with `backdrop-filter: blur()`, translucent borders, and glass shadows
 - **Theme**: Dark by default (no light mode). Background: `hsl(222 47% 6%)`. Accent: blue (`hsl(220 100% 55%)`) + violet (`hsl(270 80% 60%)`). Glass panels: `rgba(255,255,255,0.06)` with blur.

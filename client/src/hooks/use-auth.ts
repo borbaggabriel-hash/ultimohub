@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import type { User } from "@shared/models/auth";
 
 async function fetchUser(): Promise<User | null> {
@@ -20,6 +21,7 @@ async function fetchUser(): Promise<User | null> {
 
 export function useAuth() {
   const queryClient = useQueryClient();
+  const [, navigate] = useLocation();
 
   const { data: user, isLoading, error } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
@@ -75,7 +77,7 @@ export function useAuth() {
     onSuccess: () => {
       queryClient.setQueryData(["/api/auth/user"], null);
       queryClient.clear();
-      window.location.href = "/login";
+      navigate("/login", { replace: true });
     },
   });
 

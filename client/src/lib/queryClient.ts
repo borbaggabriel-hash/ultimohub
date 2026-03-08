@@ -38,7 +38,8 @@ export const getQueryFn: <T>(options: {
     }
 
     if (res.status === 401) {
-      window.location.href = "/api/login";
+      const { memoryNavigate } = await import("@/lib/memory-router");
+      memoryNavigate("/login");
       return null;
     }
 
