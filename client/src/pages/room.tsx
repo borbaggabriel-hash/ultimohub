@@ -400,10 +400,12 @@ function RecordingProfilePanel({
   );
   const [freeCharName, setFreeCharName] = useState(existingProfile?.characterName || "");
 
+  const { toast } = useToast();
   const selectedChar = characters.find((c) => c.id === selectedCharId);
   const hasCharacters = characters.length > 0;
+  const [isCreating, setIsCreating] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!actorName.trim()) return;
     if (hasCharacters && selectedChar) {
       onSave({
@@ -416,19 +418,30 @@ function RecordingProfilePanel({
         productionId,
       });
     } else if (freeCharName.trim()) {
-      onSave({
-        voiceActorName: actorName.trim(),
-        characterName: freeCharName.trim(),
-        characterId: "manual",
-        voiceActorId: user?.id || "",
-        userId: user?.id || "",
-        sessionId,
-        productionId,
-      });
+      setIsCreating(true);
+      try {
+        const created = await authFetch(`/api/productions/${productionId}/characters`, {
+          method: "POST",
+          body: JSON.stringify({ name: freeCharName.trim(), productionId }),
+        });
+        onSave({
+          voiceActorName: actorName.trim(),
+          characterName: freeCharName.trim(),
+          characterId: created.id,
+          voiceActorId: user?.id || "",
+          userId: user?.id || "",
+          sessionId,
+          productionId,
+        });
+      } catch (err: any) {
+        toast({ title: "Erro ao criar personagem", description: err?.message || "Tente novamente", variant: "destructive" });
+      } finally {
+        setIsCreating(false);
+      }
     }
   };
 
-  const canSubmit = actorName.trim() && (hasCharacters ? !!selectedCharId : freeCharName.trim());
+  const canSubmit = !isCreating && actorName.trim() && (hasCharacters ? !!selectedCharId : freeCharName.trim());
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
@@ -514,7 +527,7 @@ function RecordingProfilePanel({
             className="vhub-btn-sm vhub-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
             data-testid="button-save-profile"
           >
-            Iniciar Gravacao
+            {isCreating ? "Criando personagem..." : "Iniciar Gravacao"}
           </button>
         </div>
       </div>
