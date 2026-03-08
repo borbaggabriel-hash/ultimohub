@@ -538,13 +538,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const filePath = safeAudioPath(take.audioUrl);
       if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ message: "Arquivo nao encontrado" });
-      const charName = (take.characterName || "PERSONAGEM").replace(/\s+/g, "");
-      const actorName = (take.voiceActorName || "DUBLADOR").replace(/\s+/g, "");
-      const d = take.createdAt ? new Date(take.createdAt) : new Date();
-      const hh = String(d.getHours()).padStart(2, "0");
-      const mm = String(d.getMinutes()).padStart(2, "0");
-      const ss = String(d.getSeconds()).padStart(2, "0");
-      const filename = `${charName}_${actorName}_${hh}${mm}${ss}.WAV`;
+      const filename = path.basename(take.audioUrl);
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Type", "audio/wav");
       fs.createReadStream(filePath).pipe(res);
@@ -580,13 +574,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       for (const take of takeList) {
         const filePath = safeAudioPath(take.audioUrl);
         if (!filePath || !fs.existsSync(filePath)) continue;
-        const charName = (take.characterName || "PERSONAGEM").replace(/\s+/g, "");
-        const actorName = (take.voiceActorName || "DUBLADOR").replace(/\s+/g, "");
-        const d = take.createdAt ? new Date(take.createdAt) : new Date();
-        const hh = String(d.getHours()).padStart(2, "0");
-        const mm = String(d.getMinutes()).padStart(2, "0");
-        const ss = String(d.getSeconds()).padStart(2, "0");
-        const filename = `${charName}_${actorName}_${hh}${mm}${ss}.WAV`;
+        const filename = path.basename(take.audioUrl);
         archive.file(filePath, { name: filename });
       }
       await archive.finalize();
@@ -616,13 +604,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       for (const take of takeList) {
         const filePath = safeAudioPath(take.audioUrl);
         if (!filePath || !fs.existsSync(filePath)) continue;
-        const charName = (take.characterName || "PERSONAGEM").replace(/\s+/g, "");
-        const actorName = (take.voiceActorName || "DUBLADOR").replace(/\s+/g, "");
-        const d = take.createdAt ? new Date(take.createdAt) : new Date();
-        const hh = String(d.getHours()).padStart(2, "0");
-        const mm = String(d.getMinutes()).padStart(2, "0");
-        const ss = String(d.getSeconds()).padStart(2, "0");
-        const filename = `${charName}_${actorName}_${hh}${mm}${ss}.WAV`;
+        const filename = path.basename(take.audioUrl);
         archive.file(filePath, { name: filename });
       }
       await archive.finalize();
@@ -652,13 +634,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       for (const take of takeList) {
         const filePath = safeAudioPath(take.audioUrl);
         if (!filePath || !fs.existsSync(filePath)) continue;
-        const charName = (take.characterName || "PERSONAGEM").replace(/\s+/g, "");
-        const actorName = (take.voiceActorName || "DUBLADOR").replace(/\s+/g, "");
-        const d = take.createdAt ? new Date(take.createdAt) : new Date();
-        const hh = String(d.getHours()).padStart(2, "0");
-        const mm = String(d.getMinutes()).padStart(2, "0");
-        const ss = String(d.getSeconds()).padStart(2, "0");
-        const filename = `${charName}_${actorName}_${hh}${mm}${ss}.WAV`;
+        const filename = path.basename(take.audioUrl);
         const sessionFolder = (take.sessionTitle || "Sessao").replace(/[^a-zA-Z0-9_\-]/g, "_");
         archive.file(filePath, { name: `${sessionFolder}/${filename}` });
       }

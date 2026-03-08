@@ -49,13 +49,8 @@ interface GroupedData {
 }
 
 function formatTakeFilename(take: TakeDetail): string {
-  const charName = (take.characterName || "PERSONAGEM").replace(/\s+/g, "");
-  const actorName = (take.voiceActorName || "DUBLADOR").replace(/\s+/g, "");
-  const d = new Date(take.createdAt);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${charName}_${actorName}_${hh}${mm}${ss}.WAV`;
+  const parts = take.audioUrl.split("/");
+  return parts[parts.length - 1] || "take.WAV";
 }
 
 function formatDuration(seconds: number): string {

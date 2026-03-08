@@ -1097,10 +1097,10 @@ export default function RecordingRoom() {
       const blob = wavToBlob(wavBuffer);
       const durationSeconds = getDurationSeconds(lastRecording.samples);
 
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, "0");
-      const mm = String(now.getMinutes()).padStart(2, "0");
-      const ss = String(now.getSeconds()).padStart(2, "0");
+      const tcSeconds = Math.floor(scriptLines[currentLine]?.start ?? 0);
+      const hh = String(Math.floor(tcSeconds / 3600)).padStart(2, "0");
+      const mm = String(Math.floor((tcSeconds % 3600) / 60)).padStart(2, "0");
+      const ss = String(tcSeconds % 60).padStart(2, "0");
       const cleanName = (s: string) => s.replace(/[^a-zA-Z0-9]/g, "");
       const fileName = `${cleanName(activeProfile.characterName)}_${cleanName(activeProfile.voiceActorName)}_${hh}${mm}${ss}.WAV`;
 
@@ -1153,7 +1153,7 @@ export default function RecordingRoom() {
     } finally {
       setIsSaving(false);
     }
-  }, [lastRecording, previewUrl, isSaving, currentLine, sessionId, qualityMetrics, recordingProfile, cleanupPreview, refetchTakes, toast, charactersList, session]);
+  }, [lastRecording, previewUrl, isSaving, currentLine, sessionId, qualityMetrics, recordingProfile, cleanupPreview, refetchTakes, toast, charactersList, session, scriptLines]);
 
   const handleDiscard = useCallback(() => {
     cleanupPreview();
