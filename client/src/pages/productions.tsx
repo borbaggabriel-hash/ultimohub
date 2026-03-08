@@ -301,11 +301,22 @@ function ManageProductionDialog({ productionId, studioId, open, onOpenChange }: 
     toast({ title: "Producao atualizada" });
   };
 
+  const toTimecodeString = (val: any): string => {
+    if (val === undefined || val === null) return "00:00:00";
+    if (typeof val === "number") {
+      const h = Math.floor(val / 3600);
+      const m = Math.floor((val % 3600) / 60);
+      const s = Math.floor(val % 60);
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+    return String(val) || "00:00:00";
+  };
+
   const handleScriptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
         let rawLines: any[];
@@ -313,20 +324,23 @@ function ManageProductionDialog({ productionId, studioId, open, onOpenChange }: 
           rawLines = json;
         } else if (json.lines && Array.isArray(json.lines)) {
           rawLines = json.lines;
+        } else if (json.script && Array.isArray(json.script)) {
+          rawLines = json.script;
         } else {
-          rawLines = [];
+          toast({ title: "Formato nao reconhecido", description: "O JSON deve conter um array ou um objeto com chave 'lines'.", variant: "destructive" });
+          return;
         }
-        const normalized = rawLines.map((line: any) => ({
-          character: line.character || line.personagem || line.char || "",
-          start: line.start || line.tempo || line.timecode || line.tc || "00:00:00",
-          text: line.text || line.fala || line.dialogue || line.dialog || "",
-          notes: line.notes || line.notas || "",
+        const normalized: ScriptLine[] = rawLines.map((line: any) => ({
+          character: String(line.character || line.personagem || line.char || line.name || ""),
+          start: toTimecodeString(line.start ?? line.tempo ?? line.timecode ?? line.tc ?? line.in ?? null),
+          text: String(line.text || line.fala || line.dialogue || line.dialog || line.line || ""),
+          notes: String(line.notes || line.notas || line.note || ""),
         }));
         setScriptLines(normalized);
         setScriptDirty(true);
-        toast({ title: `${normalized.length} linhas carregadas do arquivo` });
+        toast({ title: `${normalized.length} linha${normalized.length !== 1 ? "s" : ""} carregada${normalized.length !== 1 ? "s" : ""} do arquivo` });
       } catch {
-        toast({ title: "Formato JSON invalido", variant: "destructive" });
+        toast({ title: "Formato JSON invalido", description: "Verifique se o arquivo e um JSON valido.", variant: "destructive" });
       }
     };
     reader.readAsText(file);
@@ -334,10 +348,14 @@ function ManageProductionDialog({ productionId, studioId, open, onOpenChange }: 
   };
 
   const handleSaveScript = async () => {
-    const json = JSON.stringify({ lines: scriptLines });
-    await updateProd.mutateAsync({ scriptJson: json });
-    setScriptDirty(false);
-    toast({ title: `Roteiro salvo (${scriptLines.length} linhas)` });
+    try {
+      const json = JSON.stringify({ lines: scriptLines });
+      await updateProd.mutateAsync({ scriptJson: json });
+      setScriptDirty(false);
+      toast({ title: `Roteiro salvo (${scriptLines.length} linha${scriptLines.length !== 1 ? "s" : ""})` });
+    } catch (err: any) {
+      toast({ title: "Erro ao salvar roteiro", description: err?.message || "Tente novamente.", variant: "destructive" });
+    }
   };
 
   const addScriptLine = () => {
