@@ -602,7 +602,14 @@ export default function RecordingRoom() {
     if (!sessionId) return null;
     try {
       const saved = localStorage.getItem(`vhub_rec_profile_${sessionId}`);
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!parsed.characterId || !isValidUuid.test(parsed.characterId)) {
+        localStorage.removeItem(`vhub_rec_profile_${sessionId}`);
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -1059,6 +1066,33 @@ export default function RecordingRoom() {
 
     setIsSaving(true);
     try {
+      const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let activeProfile = recordingProfile;
+      const charExistsInProduction = charactersList?.some((c: any) => c.id === activeProfile.characterId);
+      const needsCharCreation = !isValidUuid.test(activeProfile.characterId) || !charExistsInProduction;
+
+      if (needsCharCreation) {
+        if (!session?.productionId || !activeProfile.characterName?.trim()) {
+          setShowProfilePanel(true);
+          toast({ title: "Perfil invalido", description: "Reconfigure seu personagem antes de salvar.", variant: "destructive" });
+          setIsSaving(false);
+          return;
+        }
+        try {
+          const created = await authFetch(`/api/productions/${session.productionId}/characters`, {
+            method: "POST",
+            body: JSON.stringify({ name: activeProfile.characterName.trim(), productionId: session.productionId }),
+          });
+          activeProfile = { ...activeProfile, characterId: created.id };
+          setRecordingProfile(activeProfile);
+          localStorage.setItem(`vhub_rec_profile_${sessionId}`, JSON.stringify(activeProfile));
+        } catch (err: any) {
+          toast({ title: "Erro ao criar personagem", description: err?.message || "Tente novamente", variant: "destructive" });
+          setIsSaving(false);
+          return;
+        }
+      }
+
       const wavBuffer = encodeWav(lastRecording.samples);
       const blob = wavToBlob(wavBuffer);
       const durationSeconds = getDurationSeconds(lastRecording.samples);
@@ -1068,11 +1102,11 @@ export default function RecordingRoom() {
       const mm = String(now.getMinutes()).padStart(2, "0");
       const ss = String(now.getSeconds()).padStart(2, "0");
       const cleanName = (s: string) => s.replace(/[^a-zA-Z0-9]/g, "");
-      const fileName = `${cleanName(recordingProfile.characterName)}_${cleanName(recordingProfile.voiceActorName)}_${hh}${mm}${ss}.WAV`;
+      const fileName = `${cleanName(activeProfile.characterName)}_${cleanName(activeProfile.voiceActorName)}_${hh}${mm}${ss}.WAV`;
 
       console.log("[SaveTake] Saving with profile:", {
-        character: recordingProfile.characterName,
-        actor: recordingProfile.voiceActorName,
+        character: activeProfile.characterName,
+        actor: activeProfile.voiceActorName,
         lineIndex: currentLine,
         durationSeconds,
         fileName,
@@ -1080,10 +1114,10 @@ export default function RecordingRoom() {
 
       const formData = new FormData();
       formData.append("audio", blob, fileName);
-      formData.append("characterId", recordingProfile.characterId);
-      formData.append("voiceActorId", recordingProfile.voiceActorId);
-      formData.append("voiceActorName", recordingProfile.voiceActorName);
-      formData.append("characterName", recordingProfile.characterName);
+      formData.append("characterId", activeProfile.characterId);
+      formData.append("voiceActorId", activeProfile.voiceActorId);
+      formData.append("voiceActorName", activeProfile.voiceActorName);
+      formData.append("characterName", activeProfile.characterName);
       formData.append("lineIndex", String(currentLine));
       formData.append("durationSeconds", String(durationSeconds));
       formData.append("qualityScore", String(qualityMetrics?.score || 0));
@@ -1119,7 +1153,7 @@ export default function RecordingRoom() {
     } finally {
       setIsSaving(false);
     }
-  }, [lastRecording, previewUrl, isSaving, currentLine, sessionId, qualityMetrics, recordingProfile, cleanupPreview, refetchTakes, toast]);
+  }, [lastRecording, previewUrl, isSaving, currentLine, sessionId, qualityMetrics, recordingProfile, cleanupPreview, refetchTakes, toast, charactersList, session]);
 
   const handleDiscard = useCallback(() => {
     cleanupPreview();

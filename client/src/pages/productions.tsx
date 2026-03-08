@@ -2,7 +2,7 @@ import { useState, useEffect, memo } from "react";
 import {
   useProductions, useCreateProduction, useUpdateProduction
 } from "@/hooks/use-productions";
-import { useCharacters, useCreateCharacter, useUpdateCharacter } from "@/hooks/use-characters";
+import { useCharacters, useCreateCharacter } from "@/hooks/use-characters";
 import { useQuery } from "@tanstack/react-query";
 import { authFetch } from "@/lib/auth-fetch";
 import { Button } from "@/components/ui/button";
@@ -240,18 +240,7 @@ function ManageProductionDialog({ productionId, studioId, open, onOpenChange }: 
   const updateProd = useUpdateProduction(studioId, productionId);
   const { data: characters } = useCharacters(productionId);
   const createChar = useCreateCharacter(productionId);
-  const updateChar = useUpdateCharacter();
   const { toast } = useToast();
-
-  const { data: members } = useQuery({
-    queryKey: ["/api/studios", studioId, "members"],
-    queryFn: () => authFetch(`/api/studios/${studioId}/members`) as Promise<any[]>,
-    enabled: !!studioId && open,
-  });
-
-  const approvedDubladores = (members || []).filter(
-    (m: any) => m.status === "approved" && m.role === "dublador"
-  );
 
   const [newCharName, setNewCharName] = useState("");
   const [editName, setEditName] = useState("");
@@ -618,44 +607,16 @@ function ManageProductionDialog({ productionId, studioId, open, onOpenChange }: 
                 {characters?.map((char: { id: string; name: string; voiceActorId: string | null }) => (
                   <div key={char.id} className="flex items-center justify-between p-3 gap-4" data-testid={`character-row-${char.id}`}>
                     <span className="text-sm font-medium text-foreground truncate">{char.name}</span>
-                    <Select
-                      value={char.voiceActorId || "unassigned"}
-                      onValueChange={async (val) => {
-                        await updateChar.mutateAsync({
-                          id: char.id,
-                          voiceActorId: val === "unassigned" ? null : val
-                        });
-                        toast({ title: "Dublador atribuido" });
-                      }}
-                    >
-                      <SelectTrigger className="w-[200px] h-8 text-xs" data-testid={`select-actor-${char.id}`}>
-                        <SelectValue placeholder={pt.productions.assignActor} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unassigned">Nao atribuido</SelectItem>
-                        {approvedDubladores.map((m: any) => (
-                          <SelectItem key={m.userId} value={m.userId}>
-                            {m.user?.displayName || m.user?.artistName || m.user?.fullName || m.user?.email || "Dublador"}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
                 ))}
                 {(!characters || characters.length === 0) && (
                   <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                     <UserPlus className="w-6 h-6 mb-2 opacity-40" />
                     <p className="text-sm">Nenhum personagem adicionado</p>
-                    <p className="text-xs mt-1">Adicione personagens e atribua dubladores</p>
+                    <p className="text-xs mt-1">Adicione personagens para esta producao</p>
                   </div>
                 )}
               </div>
-
-              {approvedDubladores.length === 0 && (characters?.length ?? 0) > 0 && (
-                <div className="p-3 rounded-lg bg-amber-500/12 border border-amber-500/25 text-xs text-amber-400">
-                  Nenhum membro com o papel "Dublador" encontrado neste estudio. Aprove membros na pagina de Membros primeiro.
-                </div>
-              )}
             </div>
           )}
         </div>
