@@ -1,4 +1,4 @@
-import { Switch, Route, Redirect, Router as WouterRouter, useLocation } from "wouter";
+import { Switch, Route, Redirect, Router as WouterRouter } from "wouter";
 import { memoryHook, memorySearchHook } from "@/lib/memory-router";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -28,7 +28,6 @@ import { StudioLayout } from "@/components/layout/studio-layout";
 
 function ProtectedRoute({ component: Component, requireStudio = false, ...rest }: any) {
   const { user, isLoading } = useAuth();
-  const [, navigate] = useLocation();
 
   if (isLoading) {
     return (
@@ -39,8 +38,7 @@ function ProtectedRoute({ component: Component, requireStudio = false, ...rest }
   }
 
   if (!user) {
-    navigate("/login", { replace: true });
-    return null;
+    return <Redirect to="/login" replace />;
   }
 
   if (requireStudio) {
@@ -63,7 +61,6 @@ function ProtectedRoute({ component: Component, requireStudio = false, ...rest }
 
 function StudioSelectRoute() {
   const { user, isLoading } = useAuth();
-  const [, navigate] = useLocation();
 
   if (isLoading) {
     return (
@@ -74,8 +71,7 @@ function StudioSelectRoute() {
   }
 
   if (!user) {
-    navigate("/login", { replace: true });
-    return null;
+    return <Redirect to="/login" replace />;
   }
 
   return <StudioSelect />;
