@@ -32,6 +32,9 @@ const registerSchema = z.object({
 });
 
 async function seedPlatformOwner() {
+  if (!process.env.DATABASE_URL) {
+    return;
+  }
   try {
     const existing = await authStorage.getUserByEmail("borbaggabriel@gmail.com");
     if (!existing) {

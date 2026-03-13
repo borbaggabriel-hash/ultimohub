@@ -33,11 +33,11 @@ export function setupVideoSync(httpServer: Server) {
         const room = rooms.get(sessionId);
         if (!room) return;
         const payload = JSON.stringify(msg);
-        for (const client of room) {
+        room.forEach((client) => {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
             client.send(payload);
           }
-        }
+        });
       } catch {
         // ignore malformed messages
       }

@@ -17,6 +17,8 @@ import {
 } from "@shared/schema";
 import { requireAuth, requireAdmin, requireStudioAccess, requireStudioRole } from "./middleware/auth";
 import { logger } from "./lib/logger";
+import { spawn } from "child_process";
+import { randomUUID } from "crypto";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -27,12 +29,45 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 const uploadsDir = path.join(process.cwd(), "public", "uploads");
 fs.mkdirSync(uploadsDir, { recursive: true });
 
+const mediaJobsDir = path.join(process.cwd(), "public", "media-jobs");
+fs.mkdirSync(mediaJobsDir, { recursive: true });
+
+const mediaUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const original = file.originalname || "media";
+      const safe = original.replace(/[^a-zA-Z0-9_.\-]/g, "");
+      const ext = path.extname(safe);
+      const base = safe.slice(0, Math.max(0, safe.length - ext.length));
+      cb(null, `${base || "media"}_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 1024 * 1024 * 1024 },
+});
+
 function safeAudioPath(audioUrl: string): string | null {
   const normalized = audioUrl.replace(/^\/+/, "");
   const resolved = path.resolve(process.cwd(), "public", normalized);
   const uploadsBase = path.resolve(process.cwd(), "public", "uploads");
   if (!resolved.startsWith(uploadsBase)) return null;
   return resolved;
+}
+
+function safeJobId(jobId: string): string | null {
+  const cleaned = jobId.replace(/[^a-zA-Z0-9_\-]/g, "");
+  if (!cleaned || cleaned.length < 8) return null;
+  return cleaned;
+}
+
+function jobStatusPath(jobId: string): string {
+  return path.join(mediaJobsDir, jobId, "status.json");
+}
+
+function ensureJobDir(jobId: string): string {
+  const dir = path.join(mediaJobsDir, jobId);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 async function logAdminAction(req: Request, action: string, details?: string) {
@@ -102,6 +137,96 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.status(200).json(updated);
     } catch (err: any) {
       res.status(400).json({ message: err.message || "Falha ao atualizar perfil" });
+    }
+  });
+
+  app.post("/api/media-jobs", mediaUpload.single("media"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "Arquivo não enviado" });
+
+      const filename = path.basename(req.file.path);
+      const publicRel = `/uploads/${filename}`;
+      const inputPath = safeAudioPath(publicRel);
+      if (!inputPath || !fs.existsSync(inputPath)) {
+        return res.status(400).json({ message: "Falha ao salvar arquivo" });
+      }
+
+      const jobId = randomUUID();
+      ensureJobDir(jobId);
+
+      const initialStatus = {
+        job_id: jobId,
+        status: "queued",
+        step: "queued",
+        progress: 0,
+        message: null,
+        error: null,
+        outputs: null,
+      };
+      fs.writeFileSync(jobStatusPath(jobId), JSON.stringify(initialStatus, null, 2));
+
+      const workerScript = path.join(process.cwd(), "services", "media-pipeline", "worker.py");
+      const venvPython = path.join(process.cwd(), "services", "media-pipeline", ".venv", "bin", "python");
+      const python = process.env.PYTHON_BIN || (fs.existsSync(venvPython) ? venvPython : "python3");
+      const bundledFfmpeg = path.join(process.cwd(), "services", "media-pipeline", "bin", "ffmpeg");
+      const ffmpegPath = process.env.FFMPEG_PATH || (fs.existsSync(bundledFfmpeg) ? bundledFfmpeg : "ffmpeg");
+      const jobDir = ensureJobDir(jobId);
+      const outLogPath = path.join(jobDir, "worker.log");
+      const errLogPath = path.join(jobDir, "worker.err.log");
+      const outFd = fs.openSync(outLogPath, "a");
+      const errFd = fs.openSync(errLogPath, "a");
+      const child = spawn(
+        python,
+        [workerScript, "--job-id", jobId, "--input", publicRel],
+        {
+          detached: true,
+          stdio: ["ignore", outFd, errFd],
+          env: {
+            ...process.env,
+            VHUB_REPO_ROOT: process.cwd(),
+            VHUB_PUBLIC_DIR: path.join(process.cwd(), "public"),
+            VHUB_MEDIA_JOBS_DIR: path.join(process.cwd(), "public", "media-jobs"),
+            VHUB_UPLOADS_DIR: path.join(process.cwd(), "public", "uploads"),
+            VHUB_PIPELINE_STRICT: "1",
+            FFMPEG_PATH: ffmpegPath,
+          },
+        },
+      );
+      try { fs.closeSync(outFd); } catch {}
+      try { fs.closeSync(errFd); } catch {}
+      child.on("error", (e: any) => {
+        try {
+          const failed = {
+            job_id: jobId,
+            status: "failed",
+            step: "error",
+            progress: 1,
+            message: null,
+            error: e?.message || "Falha ao iniciar worker",
+            outputs: null,
+          };
+          fs.writeFileSync(jobStatusPath(jobId), JSON.stringify(failed, null, 2));
+        } catch {}
+      });
+      child.unref();
+
+      res.status(201).json({ jobId, input: publicRel, statusUrl: `/api/media-jobs/${jobId}` });
+    } catch (err: any) {
+      logger.error("[Media Pipeline] Create job error", { message: err?.message });
+      res.status(500).json({ message: err?.message || "Erro ao criar job" });
+    }
+  });
+
+  app.get("/api/media-jobs/:jobId", async (req, res) => {
+    try {
+      const jobId = safeJobId(req.params.jobId);
+      if (!jobId) return res.status(400).json({ message: "Job inválido" });
+      const p = jobStatusPath(jobId);
+      if (!fs.existsSync(p)) return res.status(404).json({ message: "Job não encontrado" });
+      const raw = fs.readFileSync(p, "utf-8");
+      res.status(200).json(JSON.parse(raw));
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Erro ao consultar job" });
     }
   });
 
@@ -620,7 +745,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (takeList.length === 0) return res.status(404).json({ message: "Takes nao encontrados" });
       const user = (req as any).user!;
       if (user.role !== "platform_owner") {
-        const studioIds = [...new Set(takeList.map((t: any) => t.studioId))];
+        const studioIds: string[] = [];
+        const seen: Record<string, true> = {};
+        for (const take of takeList as any[]) {
+          const sid = String(take.studioId ?? "");
+          if (!sid) continue;
+          if (seen[sid]) continue;
+          seen[sid] = true;
+          studioIds.push(sid);
+        }
         for (const sid of studioIds) {
           const roles = await storage.getUserRolesInStudio(user.id, sid as string);
           if (!roles.includes("studio_admin")) {

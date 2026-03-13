@@ -4,6 +4,8 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { setupVideoSync } from "./video-sync";
+import { registerMeRestore } from "./me-restore";
+import { registerVoiceJobs } from "./voice-jobs";
 import path from "path";
 
 const app = express();
@@ -27,6 +29,26 @@ app.use(express.urlencoded({ extended: false }));
 
 // Serve uploaded audio files
 app.use("/uploads", express.static(path.join(process.cwd(), "public", "uploads")));
+app.use("/media-jobs", express.static(path.join(process.cwd(), "public", "media-jobs")));
+app.use("/voice-jobs", express.static(path.join(process.cwd(), "public", "voice-jobs")));
+
+// Serve Alinhador App (Static Frontend)
+app.use("/alinhador", express.static(path.join(process.cwd(), "alinhador-legacy", "frontend", "build")));
+
+// Serve HUBDUB-STUDIO App
+app.use("/hub-dub-legacy", express.static(path.join(process.cwd(), "HUBDUB-STUDIO", "client", "dist")));
+
+// Fallback for Alinhador SPA Routing
+app.get(/\/alinhador\/.*/, (_req: Request, res: Response) => {
+  res.sendFile(path.join(process.cwd(), "alinhador-legacy", "frontend", "build", "index.html"));
+});
+
+// Fallback for HUBDUB-STUDIO SPA Routing
+app.get(/\/hub-dub-legacy\/.*/, (_req: Request, res: Response) => {
+  res.sendFile(path.join(process.cwd(), "HUBDUB-STUDIO", "client", "dist", "index.html"));
+});
+
+
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -68,6 +90,8 @@ app.use((req, res, next) => {
 (async () => {
   await setupAuth(app);
   registerAuthRoutes(app);
+  registerVoiceJobs(app);
+  registerMeRestore(app);
   await registerRoutes(httpServer, app);
   setupVideoSync(httpServer);
 
@@ -95,10 +119,10 @@ app.use((req, res, next) => {
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
+  // Other ports are firewalled. Default to 5002 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const port = parseInt(process.env.PORT || "5002", 10);
   httpServer.listen(
     {
       port,

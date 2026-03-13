@@ -4,3 +4,8 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+public/uploads
+public/voice-jobs
+services/media-pipeline/bin/ffmpeg
+services/media-pipeline/__pycache__
+services/media-pipeline/media_pipeline/__pycache__

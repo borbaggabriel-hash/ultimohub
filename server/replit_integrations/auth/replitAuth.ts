@@ -25,6 +25,19 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000;
+  const secret = process.env.SESSION_SECRET || "dev-session-secret";
+  if (!process.env.DATABASE_URL) {
+    return session({
+      secret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: sessionTtl,
+      },
+    });
+  }
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
@@ -33,7 +46,7 @@ export function getSession() {
     tableName: "http_sessions",
   });
   return session({
-    secret: process.env.SESSION_SECRET!,
+    secret,
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
