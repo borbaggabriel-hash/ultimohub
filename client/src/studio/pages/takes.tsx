@@ -172,7 +172,7 @@ function TakeRow({
             </Badge>
           )}
           {take.aiRecommended && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-500/40 text-blue-400 bg-blue-500/10">
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-zinc-500/40 text-zinc-400 bg-zinc-500/10">
               AI
             </Badge>
           )}
@@ -374,7 +374,7 @@ function SessionGroup({
                         href={t.outputUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-xs underline underline-offset-2 text-blue-400 shrink-0"
+                        className="text-xs underline underline-offset-2 text-amber-400 shrink-0"
                         data-testid={`link-download-track-${t.filename}`}
                       >
                         Download

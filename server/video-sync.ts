@@ -18,10 +18,14 @@ interface SyncMessage {
     | "text-control:state"
     | "text-control:set-controller"
     | "text-control:clear-controller"
+    | "text-control:set-controllers"
+    | "text-control:grant-controller"
+    | "text-control:revoke-controller"
     | "text-control:update-line";
   currentTime?: number;
   lineIndex?: number;
   targetUserId?: string;
+  targetUserIds?: string[];
   loopRange?: { start: number; end: number } | null;
   userId?: string;
   role?: string;
@@ -29,13 +33,28 @@ interface SyncMessage {
   permissions?: string[];
   users?: Array<{ userId: string; name: string; role?: string }>;
   controllerUserId?: string | null;
+  controllerUserIds?: string[];
   text?: string;
 }
 
 const rooms = new Map<string, Set<WebSocket & { userId?: string; role?: string; name?: string; sessionId?: string }>>();
 const tempPermissions = new Map<string, Set<string>>();
 const globalControlSessions = new Map<string, boolean>();
-const textControllerSessions = new Map<string, string | null>();
+const textControllerSessions = new Map<string, Set<string>>();
+
+function getTextControllers(sessionId: string) {
+  return textControllerSessions.get(sessionId) || new Set<string>();
+}
+
+function setTextControllers(sessionId: string, userIds: Iterable<string>) {
+  const next = new Set(Array.from(userIds).filter(Boolean));
+  if (next.size === 0) {
+    textControllerSessions.delete(sessionId);
+  } else {
+    textControllerSessions.set(sessionId, next);
+  }
+  return next;
+}
 
 function getRoster(room: Set<WebSocket & { userId?: string; role?: string; name?: string }>) {
   const users: Array<{ userId: string; name: string; role?: string }> = [];
@@ -151,14 +170,14 @@ export function setupVideoSync(httpServer: Server) {
       const room = rooms.get(sessionId)!;
       const perms = Array.from(tempPermissions.get(sessionId) || []);
       const globalControl = globalControlSessions.get(sessionId) || false;
-      const controllerUserId = textControllerSessions.get(sessionId) ?? null;
+      const controllerUserIds = Array.from(getTextControllers(sessionId));
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "permission-sync", permissions: perms, globalControl } satisfies SyncMessage));
         ws.send(JSON.stringify({ type: "presence-sync", users: getRoster(room) } satisfies SyncMessage));
-        ws.send(JSON.stringify({ type: "text-control:state", controllerUserId } satisfies SyncMessage));
+        ws.send(JSON.stringify({ type: "text-control:state", controllerUserIds } satisfies SyncMessage));
       }
       broadcast(room as any, { type: "presence-sync", users: getRoster(room) } satisfies SyncMessage);
-      broadcast(room as any, { type: "text-control:state", controllerUserId } satisfies SyncMessage);
+      broadcast(room as any, { type: "text-control:state", controllerUserIds } satisfies SyncMessage);
     })().catch(() => {
       ws.close(1011, "internal");
     });
@@ -172,8 +191,8 @@ export function setupVideoSync(httpServer: Server) {
         if (!room) return;
 
         const isPrivileged = isPrivilegedStudioRole(ws.role);
-        const controllerUserId = textControllerSessions.get(sessionId) ?? null;
-        const isController = Boolean(controllerUserId && ws.userId && controllerUserId === ws.userId);
+        const controllerUserIds = getTextControllers(sessionId);
+        const isController = Boolean(ws.userId && controllerUserIds.has(ws.userId));
 
         if (
           msg.type === "grant-permission" ||
@@ -181,34 +200,45 @@ export function setupVideoSync(httpServer: Server) {
           msg.type === "toggle-global-control" ||
           msg.type === "revoke-all" ||
           msg.type === "text-control:set-controller" ||
-          msg.type === "text-control:clear-controller"
+          msg.type === "text-control:clear-controller" ||
+          msg.type === "text-control:set-controllers" ||
+          msg.type === "text-control:grant-controller" ||
+          msg.type === "text-control:revoke-controller"
         ) {
           if (!isPrivileged) return;
 
           if (msg.type === "grant-permission" && msg.targetUserId) {
             if (!tempPermissions.has(sessionId)) tempPermissions.set(sessionId, new Set());
             tempPermissions.get(sessionId)!.add(msg.targetUserId);
-            textControllerSessions.set(sessionId, msg.targetUserId);
           } else if (msg.type === "revoke-permission" && msg.targetUserId) {
             tempPermissions.get(sessionId)?.delete(msg.targetUserId);
-            if (textControllerSessions.get(sessionId) === msg.targetUserId) textControllerSessions.set(sessionId, null);
           } else if (msg.type === "toggle-global-control") {
             globalControlSessions.set(sessionId, !!msg.globalControl);
           } else if (msg.type === "revoke-all") {
             tempPermissions.get(sessionId)?.clear();
             globalControlSessions.set(sessionId, false);
-            textControllerSessions.set(sessionId, null);
+            textControllerSessions.delete(sessionId);
           } else if (msg.type === "text-control:set-controller" && msg.targetUserId) {
-            textControllerSessions.set(sessionId, msg.targetUserId);
+            setTextControllers(sessionId, [msg.targetUserId]);
           } else if (msg.type === "text-control:clear-controller") {
-            textControllerSessions.set(sessionId, null);
+            textControllerSessions.delete(sessionId);
+          } else if (msg.type === "text-control:set-controllers") {
+            setTextControllers(sessionId, msg.targetUserIds || []);
+          } else if (msg.type === "text-control:grant-controller" && msg.targetUserId) {
+            const next = new Set(getTextControllers(sessionId));
+            next.add(msg.targetUserId);
+            setTextControllers(sessionId, next);
+          } else if (msg.type === "text-control:revoke-controller" && msg.targetUserId) {
+            const next = new Set(getTextControllers(sessionId));
+            next.delete(msg.targetUserId);
+            setTextControllers(sessionId, next);
           }
 
           const permissions = Array.from(tempPermissions.get(sessionId) || []);
           const globalControl = globalControlSessions.get(sessionId) || false;
-          const controllerUserId = textControllerSessions.get(sessionId) ?? null;
+          const controllerUserIds = Array.from(getTextControllers(sessionId));
           broadcast(room as any, { type: "permission-sync", permissions, globalControl } satisfies SyncMessage);
-          broadcast(room as any, { type: "text-control:state", controllerUserId } satisfies SyncMessage);
+          broadcast(room as any, { type: "text-control:state", controllerUserIds } satisfies SyncMessage);
           return;
         }
 
@@ -241,10 +271,13 @@ export function setupVideoSync(httpServer: Server) {
         }
         const roster = getRoster(room as any);
         broadcast(room as any, { type: "presence-sync", users: roster } satisfies SyncMessage);
-        const controllerUserId = textControllerSessions.get(sessionId) ?? null;
-        if (controllerUserId && !roster.some((u) => u.userId === controllerUserId)) {
-          textControllerSessions.set(sessionId, null);
-          broadcast(room as any, { type: "text-control:state", controllerUserId: null } satisfies SyncMessage);
+        const controllers = getTextControllers(sessionId);
+        if (controllers.size) {
+          const next = new Set(Array.from(controllers).filter((id) => roster.some((u) => u.userId === id)));
+          if (next.size !== controllers.size) {
+            setTextControllers(sessionId, next);
+            broadcast(room as any, { type: "text-control:state", controllerUserIds: Array.from(next) } satisfies SyncMessage);
+          }
         }
       }
     };

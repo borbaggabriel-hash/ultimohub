@@ -44,8 +44,12 @@ Maior -> menor:
 
 `platform_owner` > `studio_admin` > `diretor` > `engenheiro_audio` > `dublador` > `aluno`
 
+## Restricoes no Sistema de Dublagem
+
+- Usuarios com role `dublador` e `aluno` nao visualizam os itens de menu e secoes relacionadas a producoes (ex.: "Producoes" e "Ultimas Producoes").
+- O acesso direto a rota de listagem de producoes e bloqueado no cliente para `dublador` e `aluno` (redireciona para "Sessoes").
+
 ## Arquivos de Referencia
 
 - Normalizacao e hierarquia: [roles.ts](file:///Users/gabrielborba/Desktop/THE%20HUB/shared/roles.ts)
 - Middleware de autenticacao e role: [auth.ts](file:///Users/gabrielborba/Desktop/THE%20HUB/server/middleware/auth.ts)
-

@@ -2,14 +2,14 @@
 
 ## Visao Geral
 
-O "Controle de Texto" define quem pode interagir com o roteiro sincronizado dentro da sala (Room). O objetivo e permitir que participantes naveguem livremente no texto (rolagem independente), enquanto apenas um controlador possa clicar em falas e editar o texto para todos.
+O "Controle de Texto" define quem pode interagir com o roteiro sincronizado dentro da sala (Room). O objetivo e permitir que participantes naveguem livremente no texto (rolagem independente), enquanto um ou mais controladores possam clicar em falas e editar o texto para todos.
 
 ## Objetivos
 
 - Permitir rolagem vertical livre do texto sem ser "puxado" pelo sincronismo.
 - Desativar automaticamente o auto-follow durante rolagem manual.
 - Restaurar o auto-follow quando o usuario der play ou selecionar uma fala.
-- Implementar um controlador de texto selecionavel (single-controller) com validacao no servidor.
+- Implementar autorizacao de controle de texto para alunos/dubladores (multi-controller) com validacao no servidor.
 - Exibir indicador visual da posicao atual no texto.
 
 ## Arquitetura
@@ -17,13 +17,13 @@ O "Controle de Texto" define quem pode interagir com o roteiro sincronizado dent
 ### Estados Principais (Client)
 
 - `scriptAutoFollow`: controla se o texto acompanha automaticamente a fala atual.
-- `textControllerUserId`: userId do controlador atual do texto (recebido via WebSocket).
-- `canTextControl`: `true` quando o usuario e privilegiado ou e o controlador atual.
+- `textControllerUserIds`: conjunto de userIds autorizados a controlar o texto (recebido via WebSocket).
+- `canTextControl`: `true` quando o usuario e privilegiado ou esta autorizado em `textControllerUserIds`.
 - `lineEdits`: overrides locais do texto das falas (propagados via WebSocket).
 
 ### Estado Principal (Server)
 
-- `textControllerSessions[sessionId]`: userId atual do controlador (ou `null`).
+- `textControllerSessions[sessionId]`: conjunto de userIds autorizados (Set) (ou vazio).
 
 O estado do controlador e mantido em memoria e persiste em refresh do navegador enquanto o servidor estiver ativo.
 
@@ -34,17 +34,19 @@ O canal WebSocket e `ws(s)://<host>/ws/video-sync?sessionId=...&userId=...&role=
 ### Estado e Presenca
 
 - `presence-sync`: lista de participantes conectados.
-- `text-control:state`: estado do controlador atual.
+- `text-control:state`: estado das autorizacoes atuais.
 
 Payload:
 
 ```json
-{ "type": "text-control:state", "controllerUserId": "uuid-ou-null" }
+{ "type": "text-control:state", "controllerUserIds": ["uuid-1", "uuid-2"] }
 ```
 
-### Selecao do Controlador
+### Selecao de Autorizados
 
-- `text-control:set-controller` (somente usuario privilegiado)
+- `text-control:set-controllers` (somente usuario privilegiado)
+- `text-control:grant-controller` (somente usuario privilegiado)
+- `text-control:revoke-controller` (somente usuario privilegiado)
 - `text-control:clear-controller` (somente usuario privilegiado)
 
 ### Edicao de Linha
@@ -64,8 +66,13 @@ O servidor valida permissao e retransmite para os demais clientes, que aplicam e
 ### Niveis
 
 - Read-only: pode rolar o roteiro, sem clique e sem edicao.
-- Controlador: pode clicar em falas (seek do video com `lineIndex`) e editar texto.
-- Privilegiado: pode selecionar o controlador e tambem pode controlar/editar.
+- Autorizado: pode clicar em falas (seek do video com `lineIndex`) e editar texto.
+- Privilegiado: pode autorizar/revogar e tambem pode controlar/editar sem autorizacao previa.
+
+### Roles
+
+- Aluno e Dublador: precisam estar autorizados em `textControllerUserIds` para controlar o texto.
+- Demais roles (ex.: diretor, administrador, engenheiro, etc.): podem controlar o texto indefinidamente sem autorizacao.
 
 ### Validacao no Servidor
 
@@ -77,7 +84,7 @@ O servidor bloqueia:
 
 ### Edge Cases
 
-- Se o controlador desconectar e nao houver mais presenca dele na sala, o servidor limpa `controllerUserId` e emite `text-control:state` com `null`.
+- Se um autorizado desconectar, o servidor remove apenas aquele userId do conjunto e emite `text-control:state` atualizado.
 
 ## UX do Roteiro
 
@@ -101,14 +108,43 @@ O servidor bloqueia:
   - `HUB-ALIGN/client/src/pages/room.tsx`
   - `HUB-ALIGN/server/video-sync.ts`
 
+## Importacao de JSON e Sincronizacao por Tempo
+
+### Problema
+
+O campo de tempo recebido na importacao pode vir em formatos diferentes (ex.: `HH:MM:SS`, SMPTE `HH:MM:SS:FF`, SMPTE DF `HH:MM:SS;FF`, `MM:SS`, `SS.mmm`). Comparacoes baseadas no texto do timecode podem gerar inconsistencias entre estudios e quebrar a sincronizacao com o video.
+
+### Solucao
+
+- Durante a importacao (colar JSON / upload), cada linha recebe:
+  - `tempo`: valor original recebido (string), preservado para auditoria e referencia.
+  - `tempoEmSegundos`: valor convertido (number) para segundos absolutos com 3 casas decimais.
+- Durante a reproducao na Room, a sincronizacao do teleprompter utiliza exclusivamente `tempoEmSegundos` (e faz fallback de conversao apenas para roteiros antigos que ainda nao possuem o campo).
+
+### Funcao de Conversao
+
+`parseUniversalTimecodeToSeconds(timeString, fps = 24)`:
+
+- Detecta automaticamente os formatos suportados via Regex.
+- Converte para segundos (float) com precisao de 3 casas decimais.
+- Valida entradas invalidas e sinaliza erro (para bloquear importacao quando houver falha).
+
+### Fluxo (alto nivel)
+
+1. Usuario abre "Colar JSON" ou faz upload do arquivo no gerenciamento de producao.
+2. O sistema valida/normaliza as chaves (`personagem`/`fala`/`tempo` e aliases).
+3. Para cada linha, converte o `tempo` para `tempoEmSegundos`; se alguma linha falhar, a importacao e interrompida.
+4. O roteiro e salvo com `tempo` + `tempoEmSegundos` para garantir retrocompatibilidade e reproducao consistente.
+5. Na Room, o teleprompter usa `tempoEmSegundos` para comparar com `currentTime` do video (tolerancia operacional de ate ±0.1s depende apenas do update loop do player, nao do formato do timecode).
+
 ## Testes Manuais (Checklist)
 
 ### Modal e Lista de Participantes
 
 - Abrir/fechar o modal de Controle de Texto.
 - Confirmar que a lista reflete usuarios conectados (presence-sync).
-- Selecionar um controlador e validar destaque "Controlador".
-- Recarregar a pagina e confirmar persistencia do controlador.
+- Selecionar um ou mais autorizados e validar destaque "Autorizado".
+- Recarregar a pagina e confirmar persistencia das autorizacoes.
 
 ### Permissoes
 
@@ -116,7 +152,7 @@ O servidor bloqueia:
   - Rolar o roteiro (mouse/touch) funciona.
   - Clique em fala nao busca o video.
   - Nao aparece botao de editar fala.
-- Usuario controlador:
+- Usuario autorizado:
   - Clique em fala faz seek do video e centraliza o scroll.
   - Edicao de fala aparece e propaga para outros usuarios.
 - Tentativa de bypass:

@@ -111,11 +111,11 @@ function OverviewSection() {
       <div>
         <h2 className="text-xl font-semibold mb-4">Visao Geral do Sistema</h2>
         <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-          <StatCard label="Usuarios" value={isLoading ? "—" : stats?.users ?? 0} icon={Users} color="text-blue-400" />
+          <StatCard label="Usuarios" value={isLoading ? "—" : stats?.users ?? 0} icon={Users} color="text-primary" />
           <StatCard label="Pendentes" value={isLoading ? "—" : stats?.pendingUsers ?? 0} icon={AlertCircle} color="text-amber-400" />
           <StatCard label="Estudios" value={isLoading ? "—" : stats?.studios ?? 0} icon={Building2} color="text-violet-400" />
           <StatCard label="Producoes" value={isLoading ? "—" : stats?.productions ?? 0} icon={Film} color="text-emerald-400" />
-          <StatCard label="Sessoes" value={isLoading ? "—" : stats?.sessions ?? 0} icon={Calendar} color="text-cyan-400" />
+          <StatCard label="Sessoes" value={isLoading ? "—" : stats?.sessions ?? 0} icon={Calendar} color="text-primary" />
           <StatCard label="Takes" value={isLoading ? "—" : stats?.takes ?? 0} icon={Mic2} color="text-rose-400" />
         </div>
       </div>
