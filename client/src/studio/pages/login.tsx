@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, Mail, Lock, ChevronRight, CheckCircle2, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { Loader2, Mail, Lock, ChevronRight, CheckCircle2, AlertCircle, Eye, EyeOff, User, Phone, CalendarDays, Building2 } from "lucide-react";
 import { useAuth } from "@studio/hooks/use-auth";
 import { Input } from "@studio/components/ui/input";
 import { Button } from "@studio/components/ui/button";
 import { useToast } from "@studio/hooks/use-toast";
 import { MeshGradient } from "@/components/landing/MeshGradient";
 import { LanguageThemePill } from "@/components/nav/LanguageThemePill";
+import { maskBirthDate, maskBrazilWhatsapp, validateSimplifiedRegisterInput, normalizeEmail } from "@shared/register-validation";
 
 export default function Login() {
   const [lang, setLang] = useState<"en" | "pt">(() => {
@@ -31,11 +32,32 @@ export default function Login() {
     }
   });
   const [touched, setTouched] = useState<{ email: boolean; password: boolean }>({ email: false, password: false });
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [isSuccess, setIsSuccess] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
+  const [redirectToAfterAuth, setRedirectToAfterAuth] = useState<string | null>(null);
+  const [studios, setStudios] = useState<Array<{ id: string; name: string }>>([]);
+  const [studiosLoading, setStudiosLoading] = useState(false);
 
-  const { user, login, isLoggingIn } = useAuth();
+  const [registerForm, setRegisterForm] = useState({
+    fullName: "",
+    email: "",
+    password: "",
+    studioId: "",
+    whatsapp: "",
+    birthDate: "",
+  });
+  const [registerTouched, setRegisterTouched] = useState({
+    fullName: false,
+    email: false,
+    password: false,
+    studioId: false,
+    whatsapp: false,
+    birthDate: false,
+  });
+
+  const { user, login, isLoggingIn, register, isRegistering } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
@@ -58,11 +80,34 @@ export default function Login() {
   useEffect(() => {
     if (user && !isLoggingIn) {
       const timer = setTimeout(() => {
-        setLocation("/hub-dub/studios", { replace: true });
+        setLocation(redirectToAfterAuth || "/hub-dub/studios", { replace: true });
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [user, setLocation, isLoggingIn]);
+  }, [user, setLocation, isLoggingIn, redirectToAfterAuth]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadStudios = async () => {
+      setStudiosLoading(true);
+      try {
+        const res = await fetch("/api/auth/studios-public", { credentials: "include" });
+        if (!res.ok) throw new Error("Falha ao carregar estúdios");
+        const data = await res.json();
+        if (!mounted) return;
+        setStudios(Array.isArray(data) ? data : []);
+      } catch {
+        if (!mounted) return;
+        setStudios([]);
+      } finally {
+        if (mounted) setStudiosLoading(false);
+      }
+    };
+    loadStudios();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const emailError = useMemo(() => {
     const v = email.trim();
@@ -78,6 +123,16 @@ export default function Login() {
   }, [password, lang]);
 
   const canSubmit = !emailError && !passwordError && !isLoggingIn && !isSuccess;
+  const registerErrors = useMemo(() => validateSimplifiedRegisterInput({
+    email: registerForm.email,
+    fullName: registerForm.fullName,
+    password: registerForm.password,
+    studioId: registerForm.studioId,
+    whatsapp: registerForm.whatsapp,
+    birthDate: registerForm.birthDate,
+  }), [registerForm]);
+
+  const canSubmitRegister = Object.keys(registerErrors).length === 0 && !isRegistering && !isSuccess;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +143,7 @@ export default function Login() {
       { email: email.trim(), password },
       {
         onSuccess: () => {
+          setRedirectToAfterAuth(null);
           setIsSuccess(true);
           toast({ title: lang === "en" ? "Welcome back!" : "Bem-vindo de volta!" });
         },
@@ -95,6 +151,45 @@ export default function Login() {
           toast({
             title: lang === "en" ? "Login failed" : "Falha no login",
             description: String(err?.message || (lang === "en" ? "Invalid credentials." : "Credenciais inválidas.")),
+            variant: "destructive",
+          });
+        },
+      }
+    );
+  };
+
+  const submitRegister = (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegisterTouched({
+      fullName: true,
+      email: true,
+      password: true,
+      studioId: true,
+      whatsapp: true,
+      birthDate: true,
+    });
+    if (Object.keys(registerErrors).length > 0) return;
+
+    register(
+      {
+        email: normalizeEmail(registerForm.email),
+        fullName: registerForm.fullName.trim(),
+        password: registerForm.password,
+        studioId: registerForm.studioId,
+        whatsapp: registerForm.whatsapp,
+        birthDate: registerForm.birthDate,
+      },
+      {
+        onSuccess: (data: any) => {
+          setRedirectToAfterAuth(data?.redirectTo || `/hub-dub/studio/${registerForm.studioId}/dashboard`);
+          setIsSuccess(true);
+          toast({ title: "Conta criada com sucesso!" });
+        },
+        onError: (err: any) => {
+          const msg = String(err?.message || "Erro ao criar conta");
+          toast({
+            title: "Falha no cadastro",
+            description: msg,
             variant: "destructive",
           });
         },
@@ -223,170 +318,237 @@ export default function Login() {
               
               <div className="relative bg-white/70 backdrop-blur-3xl border border-white/20 rounded-[2rem] shadow-2xl overflow-hidden">
                 <div className="p-8 md:p-10">
-                  <div className="space-y-2 mb-10">
+                  <div className="space-y-2 mb-6">
                     <h2 className="text-3xl font-bold tracking-tight">
-                      {lang === "en" ? "Welcome back" : "Boas-vindas"}
+                      {authMode === "login" ? (lang === "en" ? "Welcome back" : "Boas-vindas") : (lang === "en" ? "Create account" : "Criar conta")}
                     </h2>
                     <p className="text-sm text-muted-foreground">
-                      {lang === "en" ? "Enter your credentials to continue" : "Insira suas credenciais para continuar"}
+                      {authMode === "login"
+                        ? (lang === "en" ? "Enter your credentials to continue" : "Insira suas credenciais para continuar")
+                        : (lang === "en" ? "Complete your registration to start now" : "Conclua seu cadastro e entre agora")}
                     </p>
                   </div>
 
-                  <form onSubmit={submit} className="space-y-6" data-testid="form-login">
-                    <div className="space-y-5">
-                      {/* Email Field */}
-                      <div className="space-y-2 group/input">
-                        <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-1">
-                          {lang === "en" ? "Work Email" : "E-mail Profissional"}
-                        </label>
-                        <div className="relative">
-                          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within/input:text-primary">
-                            <Mail className="w-4 h-4" />
+                  <div className="grid grid-cols-2 rounded-xl bg-muted/40 border border-border/50 p-1 mb-8">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode("login")}
+                      className={`h-10 rounded-lg text-xs font-bold transition-colors ${authMode === "login" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                      data-testid="button-mode-login"
+                    >
+                      {lang === "en" ? "Sign in" : "Entrar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode("register")}
+                      className={`h-10 rounded-lg text-xs font-bold transition-colors ${authMode === "register" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                      data-testid="button-mode-register"
+                    >
+                      {lang === "en" ? "Register" : "Cadastrar"}
+                    </button>
+                  </div>
+
+                  {authMode === "login" ? (
+                    <form onSubmit={submit} className="space-y-6" data-testid="form-login">
+                      <div className="space-y-5">
+                        <div className="space-y-2 group/input">
+                          <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-1">
+                            {lang === "en" ? "Work Email" : "E-mail Profissional"}
+                          </label>
+                          <div className="relative">
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within/input:text-primary">
+                              <Mail className="w-4 h-4" />
+                            </div>
+                            <Input
+                              type="email"
+                              value={email}
+                              onChange={(e) => setEmail(e.target.value)}
+                              onBlur={() => setTouched((p) => ({ ...p, email: true }))}
+                              placeholder="exemplo@estudio.com"
+                              className="pl-11 h-12 rounded-2xl border-border/40 bg-white/50 focus-visible:ring-primary/20 focus-visible:border-primary transition-all"
+                              autoComplete="email"
+                              data-testid="input-email"
+                            />
                           </div>
-                          <Input
-                            type="email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            onBlur={() => setTouched((p) => ({ ...p, email: true }))}
-                            placeholder="exemplo@estudio.com"
-                            className="pl-11 h-12 rounded-2xl border-border/40 bg-white/50 focus-visible:ring-primary/20 focus-visible:border-primary transition-all"
-                            autoComplete="email"
-                            data-testid="input-email"
-                          />
+                          <AnimatePresence>
+                            {touched.email && emailError && (
+                              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex items-center gap-1.5 px-1 text-xs text-rose-500 font-medium overflow-hidden" data-testid="error-email">
+                                <AlertCircle className="w-3 h-3" />
+                                {emailError}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
-                        <AnimatePresence>
-                          {touched.email && emailError && (
-                            <motion.div 
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="flex items-center gap-1.5 px-1 text-xs text-rose-500 font-medium overflow-hidden"
-                              data-testid="error-email"
+
+                        <div className="space-y-2 group/input">
+                          <div className="flex items-center justify-between px-1">
+                            <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80">
+                              {lang === "en" ? "Security Key" : "Chave de Segurança"}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResetEmail(email.trim());
+                                setResetOpen(true);
+                              }}
+                              className="text-[10px] font-bold uppercase tracking-[0.1em] text-primary hover:text-primary/80 transition-colors"
+                              data-testid="button-forgot-password"
                             >
-                              <AlertCircle className="w-3 h-3" />
-                              {emailError}
+                              {lang === "en" ? "Forgot?" : "Esqueceu?"}
+                            </button>
+                          </div>
+                          <div className="relative">
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within/input:text-primary">
+                              <Lock className="w-4 h-4" />
+                            </div>
+                            <Input
+                              type={showPassword ? "text" : "password"}
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                              onBlur={() => setTouched((p) => ({ ...p, password: true }))}
+                              placeholder="••••••••"
+                              className="pl-11 pr-11 h-12 rounded-2xl border-border/40 bg-white/50 focus-visible:ring-primary/20 focus-visible:border-primary transition-all"
+                              autoComplete="current-password"
+                              data-testid="input-password"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                          <AnimatePresence>
+                            {touched.password && passwordError && (
+                              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex items-center gap-1.5 px-1 text-xs text-rose-500 font-medium overflow-hidden" data-testid="error-password">
+                                <AlertCircle className="w-3 h-3" />
+                                {passwordError}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 px-1">
+                        <div onClick={() => setRememberMe(!rememberMe)} className={`w-10 h-5 rounded-full p-1 cursor-pointer transition-colors duration-300 ${rememberMe ? "bg-primary" : "bg-muted"}`} data-testid="checkbox-remember-me">
+                          <motion.div animate={{ x: rememberMe ? 20 : 0 }} className="w-3 h-3 rounded-full bg-white shadow-sm" />
+                        </div>
+                        <span className="text-xs text-muted-foreground select-none cursor-pointer" onClick={() => setRememberMe(!rememberMe)}>
+                          {lang === "en" ? "Stay signed in" : "Manter-me conectado"}
+                        </span>
+                      </div>
+
+                      <Button type="submit" disabled={!canSubmit} data-testid="button-submit-login" className={`w-full h-14 rounded-2xl font-bold text-base transition-all duration-300 relative overflow-hidden ${isSuccess ? "bg-emerald-500 hover:bg-emerald-500" : "bg-foreground hover:bg-foreground/90"}`}>
+                        <AnimatePresence mode="wait">
+                          {isLoggingIn ? (
+                            <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3">
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                              {lang === "en" ? "Authenticating..." : "Autenticando..."}
+                            </motion.div>
+                          ) : isSuccess ? (
+                            <motion.div key="success" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex items-center gap-3">
+                              <CheckCircle2 className="w-5 h-5" />
+                              {lang === "en" ? "Authorized" : "Autorizado"}
+                            </motion.div>
+                          ) : (
+                            <motion.div key="default" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2">
+                              {lang === "en" ? "Enter Studio" : "Entrar no Estúdio"}
+                              <ChevronRight className="w-5 h-5" />
                             </motion.div>
                           )}
                         </AnimatePresence>
+                      </Button>
+                    </form>
+                  ) : (
+                    <form onSubmit={submitRegister} className="space-y-4" data-testid="form-register">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-1">Nome completo</label>
+                        <div className="relative">
+                          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+                            <User className="w-4 h-4" />
+                          </div>
+                          <Input value={registerForm.fullName} onChange={(e) => setRegisterForm((p) => ({ ...p, fullName: e.target.value }))} onBlur={() => setRegisterTouched((p) => ({ ...p, fullName: true }))} className="pl-11 h-12 rounded-2xl border-border/40 bg-white/50" placeholder="Nome e sobrenome" data-testid="input-register-full-name" />
+                        </div>
+                        {registerTouched.fullName && registerErrors.fullName && <p className="text-xs text-rose-500 px-1">{registerErrors.fullName}</p>}
                       </div>
 
-                      {/* Password Field */}
-                      <div className="space-y-2 group/input">
-                        <div className="flex items-center justify-between px-1">
-                          <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80">
-                            {lang === "en" ? "Security Key" : "Chave de Segurança"}
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setResetEmail(email.trim());
-                              setResetOpen(true);
-                            }}
-                            className="text-[10px] font-bold uppercase tracking-[0.1em] text-primary hover:text-primary/80 transition-colors"
-                            data-testid="button-forgot-password"
-                          >
-                            {lang === "en" ? "Forgot?" : "Esqueceu?"}
-                          </button>
-                        </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-1">E-mail</label>
                         <div className="relative">
-                          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within/input:text-primary">
+                          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+                            <Mail className="w-4 h-4" />
+                          </div>
+                          <Input type="email" value={registerForm.email} onChange={(e) => setRegisterForm((p) => ({ ...p, email: e.target.value }))} onBlur={() => setRegisterTouched((p) => ({ ...p, email: true }))} className="pl-11 h-12 rounded-2xl border-border/40 bg-white/50" placeholder="exemplo@estudio.com" data-testid="input-register-email" />
+                        </div>
+                        {registerTouched.email && registerErrors.email && <p className="text-xs text-rose-500 px-1">{registerErrors.email}</p>}
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-1">Senha</label>
+                        <div className="relative">
+                          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
                             <Lock className="w-4 h-4" />
                           </div>
-                          <Input
-                            type={showPassword ? "text" : "password"}
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            onBlur={() => setTouched((p) => ({ ...p, password: true }))}
-                            placeholder="••••••••"
-                            className="pl-11 pr-11 h-12 rounded-2xl border-border/40 bg-white/50 focus-visible:ring-primary/20 focus-visible:border-primary transition-all"
-                            autoComplete="current-password"
-                            data-testid="input-password"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                          >
+                          <Input type={showPassword ? "text" : "password"} value={registerForm.password} onChange={(e) => setRegisterForm((p) => ({ ...p, password: e.target.value }))} onBlur={() => setRegisterTouched((p) => ({ ...p, password: true }))} className="pl-11 pr-11 h-12 rounded-2xl border-border/40 bg-white/50" placeholder="Mínimo 8 caracteres" data-testid="input-register-password" />
+                          <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
                             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
-                        <AnimatePresence>
-                          {touched.password && passwordError && (
-                            <motion.div 
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="flex items-center gap-1.5 px-1 text-xs text-rose-500 font-medium overflow-hidden"
-                              data-testid="error-password"
-                            >
-                              <AlertCircle className="w-3 h-3" />
-                              {passwordError}
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                        {registerTouched.password && registerErrors.password && <p className="text-xs text-rose-500 px-1">{registerErrors.password}</p>}
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2 px-1">
-                      <div 
-                        onClick={() => setRememberMe(!rememberMe)}
-                        className={`w-10 h-5 rounded-full p-1 cursor-pointer transition-colors duration-300 ${rememberMe ? "bg-primary" : "bg-muted"}`}
-                        data-testid="checkbox-remember-me"
-                      >
-                        <motion.div 
-                          animate={{ x: rememberMe ? 20 : 0 }}
-                          className="w-3 h-3 rounded-full bg-white shadow-sm"
-                        />
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-1">Estúdio</label>
+                        <div className="relative">
+                          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
+                            <Building2 className="w-4 h-4" />
+                          </div>
+                          <select value={registerForm.studioId} onChange={(e) => setRegisterForm((p) => ({ ...p, studioId: e.target.value }))} onBlur={() => setRegisterTouched((p) => ({ ...p, studioId: true }))} className="w-full pl-11 pr-4 h-12 rounded-2xl border border-border/40 bg-white/50 text-sm" data-testid="select-register-studio">
+                            <option value="">{studiosLoading ? "Carregando estúdios..." : "Selecione um estúdio"}</option>
+                            {studios.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {registerTouched.studioId && registerErrors.studioId && <p className="text-xs text-rose-500 px-1">{registerErrors.studioId}</p>}
                       </div>
-                      <span className="text-xs text-muted-foreground select-none cursor-pointer" onClick={() => setRememberMe(!rememberMe)}>
-                        {lang === "en" ? "Stay signed in" : "Manter-me conectado"}
-                      </span>
-                    </div>
 
-                    <Button
-                      type="submit"
-                      disabled={!canSubmit}
-                      data-testid="button-submit-login"
-                      className={`w-full h-14 rounded-2xl font-bold text-base transition-all duration-300 relative overflow-hidden ${
-                        isSuccess ? "bg-emerald-500 hover:bg-emerald-500" : "bg-foreground hover:bg-foreground/90"
-                      }`}
-                    >
-                      <AnimatePresence mode="wait">
-                        {isLoggingIn ? (
-                          <motion.div 
-                            key="loading"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-3"
-                          >
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            {lang === "en" ? "Authenticating..." : "Autenticando..."}
-                          </motion.div>
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-1">WhatsApp</label>
+                          <div className="relative">
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+                              <Phone className="w-4 h-4" />
+                            </div>
+                            <Input value={registerForm.whatsapp} onChange={(e) => setRegisterForm((p) => ({ ...p, whatsapp: maskBrazilWhatsapp(e.target.value) }))} onBlur={() => setRegisterTouched((p) => ({ ...p, whatsapp: true }))} className="pl-11 h-12 rounded-2xl border-border/40 bg-white/50" placeholder="(11) 99999-9999" data-testid="input-register-whatsapp" />
+                          </div>
+                          {registerTouched.whatsapp && registerErrors.whatsapp && <p className="text-xs text-rose-500 px-1">{registerErrors.whatsapp}</p>}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-1">Data de nascimento</label>
+                          <div className="relative">
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+                              <CalendarDays className="w-4 h-4" />
+                            </div>
+                            <Input value={registerForm.birthDate} onChange={(e) => setRegisterForm((p) => ({ ...p, birthDate: maskBirthDate(e.target.value) }))} onBlur={() => setRegisterTouched((p) => ({ ...p, birthDate: true }))} className="pl-11 h-12 rounded-2xl border-border/40 bg-white/50" placeholder="DD/MM/AAAA" data-testid="input-register-birth-date" />
+                          </div>
+                          {registerTouched.birthDate && registerErrors.birthDate && <p className="text-xs text-rose-500 px-1">{registerErrors.birthDate}</p>}
+                        </div>
+                      </div>
+
+                      <Button type="submit" disabled={!canSubmitRegister} data-testid="button-submit-register" className={`w-full h-14 rounded-2xl font-bold text-base transition-all duration-300 relative overflow-hidden ${isSuccess ? "bg-emerald-500 hover:bg-emerald-500" : "bg-foreground hover:bg-foreground/90"}`}>
+                        {isRegistering ? (
+                          <span className="flex items-center gap-3"><Loader2 className="w-5 h-5 animate-spin" />Criando conta...</span>
                         ) : isSuccess ? (
-                          <motion.div 
-                            key="success"
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            className="flex items-center gap-3"
-                          >
-                            <CheckCircle2 className="w-5 h-5" />
-                            {lang === "en" ? "Authorized" : "Autorizado"}
-                          </motion.div>
+                          <span className="flex items-center gap-3"><CheckCircle2 className="w-5 h-5" />Conta criada</span>
                         ) : (
-                          <motion.div 
-                            key="default"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="flex items-center gap-2"
-                          >
-                            {lang === "en" ? "Enter Studio" : "Entrar no Estúdio"}
-                            <ChevronRight className="w-5 h-5" />
-                          </motion.div>
+                          <span className="flex items-center gap-2">Criar conta <ChevronRight className="w-5 h-5" /></span>
                         )}
-                      </AnimatePresence>
-                    </Button>
-                  </form>
+                      </Button>
+                    </form>
+                  )}
                 </div>
 
                 <div className="p-8 text-center">

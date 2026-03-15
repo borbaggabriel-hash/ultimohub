@@ -5,6 +5,7 @@ import { isAuthenticated, hashPassword } from "./replitAuth";
 import { authStorage } from "./storage";
 import { storage } from "../../storage";
 import { logger } from "../../lib/logger";
+import { normalizeEmail, onlyDigits, parseBirthDate, validateSimplifiedRegisterInput } from "@shared/register-validation";
 
 const loginSchema = z.object({
   email: z.string().email("Email invalido"),
@@ -12,24 +13,13 @@ const loginSchema = z.object({
 });
 
 const registerSchema = z.object({
-  email: z.string().email("Email invalido"),
-  password: z.string().min(6, "Senha deve ter pelo menos 6 caracteres"),
-  fullName: z.string().min(2, "Nome obrigatorio"),
-  studioId: z.string().optional().default(""),
-  artistName: z.string().optional(),
-  phone: z.string().optional(),
-  altPhone: z.string().optional(),
-  birthDate: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  country: z.string().optional(),
-  mainLanguage: z.string().optional(),
-  additionalLanguages: z.string().optional(),
-  experience: z.string().optional(),
-  specialty: z.string().optional(),
-  bio: z.string().optional(),
-  portfolioUrl: z.string().optional(),
-}).passthrough();
+  email: z.string(),
+  password: z.string(),
+  fullName: z.string(),
+  studioId: z.string(),
+  whatsapp: z.string(),
+  birthDate: z.string(),
+}).strict();
 
 function buildComplementaryProfile(input: any) {
   const keys = [
@@ -165,29 +155,44 @@ export function registerAuthRoutes(app: Express): void {
   app.post("/api/auth/register", async (req, res) => {
     try {
       const data = registerSchema.parse(req.body);
-      const existing = await authStorage.getUserByEmail(data.email);
+      const validationErrors = validateSimplifiedRegisterInput({
+        email: data.email,
+        fullName: data.fullName,
+        password: data.password,
+        studioId: data.studioId,
+        whatsapp: data.whatsapp,
+        birthDate: data.birthDate,
+      });
+      if (Object.keys(validationErrors).length > 0) {
+        return res.status(400).json({ message: Object.values(validationErrors)[0], errors: validationErrors });
+      }
+
+      const safeEmail = normalizeEmail(data.email);
+      const existing = await authStorage.getUserByEmail(safeEmail);
       if (existing) {
         return res.status(409).json({ message: "Este email ja esta em uso" });
       }
 
       const studioId = String(data.studioId || "").trim();
-      let studio: any = null;
-      if (studioId) {
-        studio = await storage.getStudio(studioId);
-        if (!studio) {
-          return res.status(400).json({ message: "Estudio selecionado nao encontrado" });
-        }
+      const studio = await storage.getStudio(studioId);
+      if (!studio || !studio.isActive) {
+        return res.status(400).json({ message: "Estudio selecionado nao encontrado" });
+      }
+
+      const birthDateParsed = parseBirthDate(data.birthDate);
+      if (!birthDateParsed) {
+        return res.status(400).json({ message: "Data de nascimento invalida" });
       }
 
       const user = await authStorage.createUser({
-        email: data.email.toLowerCase().trim(),
+        email: safeEmail,
         passwordHash: hashPassword(data.password),
-        fullName: data.fullName,
-        displayName: data.fullName,
+        fullName: data.fullName.trim(),
+        displayName: data.fullName.trim(),
         artistName: null,
-        phone: null,
+        phone: onlyDigits(data.whatsapp),
         altPhone: null,
-        birthDate: null,
+        birthDate: data.birthDate,
         city: null,
         state: null,
         country: null,
@@ -197,11 +202,15 @@ export function registerAuthRoutes(app: Express): void {
         specialty: null,
         bio: null,
         portfolioUrl: null,
-        status: "pending",
+        status: "approved",
         role: "user",
       });
 
-      const complementary = buildComplementaryProfile(data);
+      const complementary = buildComplementaryProfile({
+        ...data,
+        phone: onlyDigits(data.whatsapp),
+        birthDate: birthDateParsed.toISOString().slice(0, 10),
+      });
       if (Object.keys(complementary).length > 0) {
         try {
           await storage.upsertUserProfile(user.id, complementary);
@@ -210,35 +219,27 @@ export function registerAuthRoutes(app: Express): void {
         }
       }
 
-      if (studioId) {
-        await storage.createMembership({
-          userId: user.id,
-          studioId,
-          role: "pending",
-          status: "pending",
-        });
-      }
+      const membership = await storage.createMembership({
+        userId: user.id,
+        studioId,
+        role: "dublador",
+        status: "approved",
+      });
 
-      try {
-        if (studioId && studio) {
-          const studioAdmins = await storage.getStudioAdmins(studioId);
-          for (const admin of studioAdmins) {
-            await storage.createNotification({
-              userId: admin.id,
-              type: "member_request",
-              title: "Novo cadastro pendente",
-              message: `${data.fullName} (${data.email}) solicitou acesso ao estudio ${studio.name}.`,
-              relatedId: user.id,
-            });
-          }
+      logger.info("New user registered (approved)", { email: safeEmail, id: user.id, studioId });
+      req.login(user, (loginErr) => {
+        if (loginErr) {
+          logger.error("Register auto-login error", { error: String(loginErr), userId: user.id });
+          return res.status(500).json({ message: "Conta criada, mas falha ao autenticar" });
         }
-      } catch (notifErr) {
-        logger.error("Error sending notifications to studio admins", { error: String(notifErr) });
-      }
-
-      logger.info("New user registered (pending)", { email: data.email, id: user.id, studioId: studioId || null });
-      const { passwordHash, ...safeUser } = user;
-      return res.status(201).json({ user: safeUser });
+        const { passwordHash, ...safeUser } = user;
+        return res.status(201).json({
+          user: safeUser,
+          studioId,
+          membershipId: membership.id,
+          redirectTo: `/hub-dub/studio/${studioId}/dashboard`,
+        });
+      });
     } catch (err: any) {
       if (err.errors) {
         return res.status(400).json({ message: err.errors[0]?.message || "Dados invalidos" });

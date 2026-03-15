@@ -37,6 +37,13 @@ import { useToast } from "@studio/hooks/use-toast";
 import { useAuth } from "@studio/hooks/use-auth";
 import { formatTimecode, parseTimecode, parseUniversalTimecodeToSeconds } from "@studio/lib/timecode";
 import { cn } from "@studio/lib/utils";
+import {
+  buildScrollAnchors,
+  computeAdaptiveMaxSpeedPxPerSec,
+  interpolateScrollTop,
+  smoothScrollStep,
+  type ScrollAnchor,
+} from "@studio/lib/script-scroll-sync";
 
 import {
   requestMicrophone,
@@ -770,9 +777,13 @@ export default function RecordingRoom() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scriptViewportRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const scriptAutoFollowRef = useRef(true);
   const [scriptAutoFollow, setScriptAutoFollow] = useState(true);
   const userScrollIntentTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollAnchorsRef = useRef<ScrollAnchor[]>([]);
+  const scrollSyncRafRef = useRef<number | null>(null);
+  const scrollSyncLastTsRef = useRef<number | null>(null);
+  const scrollSyncCurrentRef = useRef(0);
+  const scrollSyncLastVideoTimeRef = useRef(0);
 
   const [micReady, setMicReady] = useState(false);
   const [micState, setMicState] = useState<MicrophoneState | null>(null);
@@ -867,32 +878,100 @@ export default function RecordingRoom() {
     };
   }, [sessionId]);
 
-  const scrollScriptToLine = useCallback((index: number, behavior: ScrollBehavior = "smooth") => {
-    const line = lineRefs.current[index];
+  const rebuildScrollAnchors = useCallback(() => {
     const viewport = scriptViewportRef.current;
-    if (line && viewport) {
-      const top = line.offsetTop - viewport.clientHeight / 2 + line.clientHeight / 2;
-      viewport.scrollTo({ top, behavior });
+    if (!viewport || !scriptLines.length) return;
+    const lineOffsets: number[] = [];
+    const lineHeights: number[] = [];
+    const lineStarts: number[] = [];
+    for (let i = 0; i < scriptLines.length; i++) {
+      const el = lineRefs.current[i];
+      if (!el) continue;
+      lineOffsets.push(el.offsetTop);
+      lineHeights.push(el.offsetHeight || 1);
+      lineStarts.push(scriptLines[i].start);
     }
-  }, []);
+    scrollAnchorsRef.current = buildScrollAnchors({
+      lineStarts,
+      lineOffsets,
+      lineHeights,
+      viewportHeight: viewport.clientHeight,
+      maxScrollTop: viewport.scrollHeight - viewport.clientHeight,
+    });
+    scrollSyncCurrentRef.current = viewport.scrollTop;
+  }, [scriptLines]);
 
   useEffect(() => {
-    if (scriptAutoFollow) {
-      scrollScriptToLine(currentLine);
-    }
-  }, [currentLine, scriptAutoFollow, scrollScriptToLine]);
+    const viewport = scriptViewportRef.current;
+    if (!viewport) return;
+    rebuildScrollAnchors();
+    const onResize = () => rebuildScrollAnchors();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [rebuildScrollAnchors]);
 
   const markScriptUserScrollIntent = useCallback(() => {
     setScriptAutoFollow(false);
     if (userScrollIntentTimeoutRef.current) clearTimeout(userScrollIntentTimeoutRef.current);
     userScrollIntentTimeoutRef.current = setTimeout(() => {
-      // Opcional: auto-retomar após X segundos de inatividade?
     }, 10000);
   }, []);
 
-  const handleScriptViewportScroll = useCallback(() => {
-    // Scroll handling logic
+  const syncScrollToCurrentVideoTime = useCallback(() => {
+    const viewport = scriptViewportRef.current;
+    if (!viewport || !scrollAnchorsRef.current.length) return;
+    const t = videoRef.current?.currentTime ?? 0;
+    const target = interpolateScrollTop(scrollAnchorsRef.current, t);
+    scrollSyncCurrentRef.current = target;
+    viewport.scrollTop = target;
   }, []);
+
+  useEffect(() => {
+    const viewport = scriptViewportRef.current;
+    const video = videoRef.current;
+    if (!viewport || !video) return;
+    if (!scriptAutoFollow) return;
+
+    let mounted = true;
+    const tick = (ts: number) => {
+      if (!mounted) return;
+      const dt = scrollSyncLastTsRef.current === null ? 1 / 60 : (ts - scrollSyncLastTsRef.current) / 1000;
+      scrollSyncLastTsRef.current = ts;
+
+      const currentVideoTime = video.currentTime;
+      const previousVideoTime = scrollSyncLastVideoTimeRef.current;
+      const seeking = Math.abs(currentVideoTime - previousVideoTime) > 0.9;
+      scrollSyncLastVideoTimeRef.current = currentVideoTime;
+
+      const target = interpolateScrollTop(scrollAnchorsRef.current, currentVideoTime);
+      const maxSpeed = computeAdaptiveMaxSpeedPxPerSec({
+        contentHeight: viewport.scrollHeight,
+        viewportHeight: viewport.clientHeight,
+        videoDuration: videoDuration || video.duration || 0,
+        lineCount: scriptLines.length,
+        seeking,
+      });
+
+      const next = smoothScrollStep({
+        current: scrollSyncCurrentRef.current,
+        target,
+        dtSeconds: dt,
+        maxSpeedPxPerSec: maxSpeed,
+        response: video.paused ? 18 : 11,
+      });
+      scrollSyncCurrentRef.current = next;
+      viewport.scrollTop = next;
+      scrollSyncRafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    scrollSyncRafRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      mounted = false;
+      if (scrollSyncRafRef.current !== null) window.cancelAnimationFrame(scrollSyncRafRef.current);
+      scrollSyncRafRef.current = null;
+      scrollSyncLastTsRef.current = null;
+    };
+  }, [scriptAutoFollow, scriptLines.length, videoDuration]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1973,7 +2052,7 @@ export default function RecordingRoom() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => { setScriptAutoFollow(true); scrollScriptToLine(currentLine, "smooth"); }}
+                  onClick={() => { setScriptAutoFollow(true); syncScrollToCurrentVideoTime(); }}
                   className={cn(
                     "text-[10px] px-2 py-1 rounded-full transition-colors border",
                     scriptAutoFollow ? "bg-primary/15 text-primary border-primary/25" : "bg-muted/60 text-muted-foreground border-border/70"
@@ -1996,6 +2075,9 @@ export default function RecordingRoom() {
               onWheelCapture={markScriptUserScrollIntent}
               onTouchMoveCapture={markScriptUserScrollIntent}
               onPointerDownCapture={markScriptUserScrollIntent}
+              onScrollCapture={() => {
+                scrollSyncCurrentRef.current = scriptViewportRef.current?.scrollTop || 0;
+              }}
             >
               {scriptLines.map((line, i) => {
                 const isActive = i === currentLine;
