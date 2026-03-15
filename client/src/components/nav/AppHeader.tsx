@@ -17,8 +17,6 @@ export const defaultLandingHeaderTextConfig: LandingHeaderTextConfig = {
   brandAlt: "THE HUB",
   brandName: "THE HUB",
   navHubDub: "HUBDUB",
-  navHubSchool: "HUBSCHOOL",
-  navHubAlign: "HUBALIGN",
   authEnter: "ENTRAR",
   authExit: "SAIR",
 };
